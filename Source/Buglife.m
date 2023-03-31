@@ -162,6 +162,15 @@ const LIFEInvocationOptions LIFEInvocationOptionsScreenRecordingFinished = 1 << 
     return self;
 }
 
+- (void)configureNavBar {
+    if (@available(iOS 15.0, *)) {
+        UINavigationBarAppearance *navBarAppearance = [[UINavigationBarAppearance alloc] init];
+        [navBarAppearance configureWithOpaqueBackground];
+        [UINavigationBar appearance].standardAppearance = navBarAppearance;
+        [UINavigationBar appearance].scrollEdgeAppearance = navBarAppearance;
+    }
+}
+
 - (instancetype)init
 {
     LIFELogExtError(@"Buglife Error: Sorry, Buglife is a singleton! 😁 Please initialize using +[Buglife sharedBuglife].");
@@ -423,7 +432,17 @@ const LIFEInvocationOptions LIFEInvocationOptionsScreenRecordingFinished = 1 << 
         }
         
         let nav = [[LIFENavigationController alloc] initWithRootViewController:vc];
-        [self _showContainerWindowWithViewController:nav animated:animated completion:completionBlock];
+                    
+        // Configure nav bar to prevent transparency for iOS15+
+        [self configureNavBar];
+        
+        if ([self isUsingScene]) {
+            UIViewController *rootController = [self getKeyWindow].rootViewController;
+            [rootController presentViewController:nav animated:YES completion:nil];
+        } else {
+            [self _showContainerWindowWithViewController:nav animated:animated completion:completionBlock];
+        }
+         
     } else {
         if (screenshot) {
             BOOL simulateScreenshotCapture = (invocation != LIFEInvocationOptionsScreenshot);
@@ -446,13 +465,30 @@ const LIFEInvocationOptions LIFEInvocationOptionsScreenRecordingFinished = 1 << 
     [self.dataProvider logClientEventWithName:@"presented_reporter" afterDelay:2.0];
 }
 
+- (UIWindow *)getKeyWindow {
+    for (UIScene *scene in [[UIApplication sharedApplication]connectedScenes]) {
+        if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            for (UIWindow *window in windowScene.windows) {
+                if (window.keyWindow) {
+                    return window;
+                }
+            }
+        }
+    }
+    return [[UIApplication sharedApplication] keyWindow];
+}
+
+- (BOOL)isUsingScene {
+    return [[UIApplication sharedApplication]connectedScenes].count > 0;
+}
+
 - (void)_showContainerWindowWithViewController:(nonnull UIViewController *)viewController animated:(BOOL)animated completion:(void (^)(void))completion
 {
     if (self.containerWindow == nil) {
         self.containerWindow = [LIFEContainerWindow window];
         self.containerWindow.hidden = NO;
     }
-    
     [self.containerWindow.containerViewController life_presentViewController:viewController animated:animated completion:completion];
     self.reportAlertOrWindowVisible = YES;
 }
@@ -461,19 +497,23 @@ const LIFEInvocationOptions LIFEInvocationOptionsScreenRecordingFinished = 1 << 
 {
     __weak typeof(self) weakSelf = self;
     
-    [self.containerWindow.containerViewController life_dismissEverythingAnimated:animated completion:^{
-        __strong Buglife *strongSelf = weakSelf;
-        if (strongSelf) {
-            [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
-        }
-    }];
-    
-    [self.reportWindow dismissAnimated:animated completion:^{
-        __strong Buglife *strongSelf = weakSelf;
-        if (strongSelf) {
-            [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
-        }
-    }];
+    if ([self isUsingScene]) {
+        [[self getKeyWindow].rootViewController.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        [self.containerWindow.containerViewController life_dismissEverythingAnimated:animated completion:^{
+            __strong Buglife *strongSelf = weakSelf;
+            if (strongSelf) {
+                [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
+            }
+        }];
+        
+        [self.reportWindow dismissAnimated:animated completion:^{
+            __strong Buglife *strongSelf = weakSelf;
+            if (strongSelf) {
+                [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
+            }
+        }];
+    }
 }
 
 - (void)_dismissReporterWithWindowBlindsAnimation:(BOOL)animated andShowThankYouDialog:(BOOL)shouldShowThankYouDialog
@@ -492,21 +532,26 @@ const LIFEInvocationOptions LIFEInvocationOptionsScreenRecordingFinished = 1 << 
         }
     }];
 
-    [self.reportWindow dismissAnimated:animated completion:^{
-        __strong Buglife *strongSelf = weakSelf;
-        if (strongSelf) {
-            if (shouldShowThankYouDialog) {
-                [strongSelf _showThankYouDialogWithCancelActionHandler:^{
-                    __strong Buglife *strongSelf2 = weakSelf;
-                    if (strongSelf2) {
-                        [strongSelf2 _reporterAndThankYouDialogDidDismissAnimated:animated];
-                    }
-                }];
-            } else {
-                [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
+    if ([self isUsingScene]) {
+        [[self getKeyWindow].rootViewController.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+    } else {
+        
+        [self.reportWindow dismissAnimated:animated completion:^{
+            __strong Buglife *strongSelf = weakSelf;
+            if (strongSelf) {
+                if (shouldShowThankYouDialog) {
+                    [strongSelf _showThankYouDialogWithCancelActionHandler:^{
+                        __strong Buglife *strongSelf2 = weakSelf;
+                        if (strongSelf2) {
+                            [strongSelf2 _reporterAndThankYouDialogDidDismissAnimated:animated];
+                        }
+                    }];
+                } else {
+                    [strongSelf _reporterAndThankYouDialogDidDismissAnimated:animated];
+                }
             }
-        }
-    }];
+        }];
+    }
 }
 
 - (void)_reporterAndThankYouDialogDidDismissAnimated:(BOOL)animated
